@@ -1,0 +1,294 @@
+#!/bin/bash
+
+WORK="$HOME/ffmpeg"
+SOURCE="$WORK/source"
+BUILD="$WORK/build"
+BIN="$WORK/bin"
+
+PKGLIST="autoconf automake build-essential cmake bzip2 git libtool pkg-config texinfo zlib1g-dev curl libva-dev"
+FLAGLIST="--target-os=linux --disable-vdpau --disable-shared --disable-doc --disable-debug --disable-libxcb --disable-sdl2 \
+--disable-xlib --enable-pic --enable-small --enable-gpl --enable-zlib --enable-libsoxr --enable-libvorbis --enable-libwebp \
+--enable-libopenjpeg --enable-openssl --enable-libsrt --enable-libspeex --enable-libmp3lame --enable-libx264 --enable-libx265 \
+--enable-libvpx --enable-libfdk-aac --enable-nonfree --enable-libmp3lame --enable-libopus --enable-libaom --enable-libvpl"
+
+# Prepare work space directory
+CREATE_WD() {
+if [ ! -d "$SOURCE" ]; then
+        mkdir -p "$SOURCE"
+fi
+
+if [ "$CUSTOMPKG" = false ] && [ ! -d "$BUILD" ]; then
+        mkdir -p "$BUILD"
+fi
+
+if [ "$CUSTOMPKG" = false ] && [ ! -d "$BIN" ]; then
+        mkdir -p "$BIN"
+fi
+}
+
+# NASM
+INST_NASM() {
+    cd "$SOURCE" && \
+    wget https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.bz2 && \
+    tar xjvf nasm-2.16.03.tar.bz2 && \
+    cd nasm-2.16.03 && \
+    ./autogen.sh && ./configure --prefix="$BIN" --bindir="$BIN" && \
+    make -j$(nproc) VERBOSE=1 && make -j$(nproc) install && make -j$(nproc) distclean
+}
+
+# zlib
+INST_ZLIB() {
+    cd "$SOURCE" && \
+    git -C zlib pull 2> /dev/null || git clone --depth 1 https://github.com/madler/zlib.git && \
+    cd zlib && \
+    PATH="$BIN:$PATH" ./configure --static --prefix="$BUILD" && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libx264
+INST_LIBX264() {
+    cd "$SOURCE" && \
+    git -C x264 pull 2> /dev/null || git clone --depth 1 https://code.videolan.org/videolan/x264.git && \
+    cd x264 && \
+    PATH="$BIN:$PATH" PKG_CONFIG_PATH="$BUILD/lib/pkgconfig" ./configure --prefix="$BUILD" --bindir="$BIN" --enable-static --enable-pic && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libx265
+INST_LIBX265() {
+    sudo apt install -y libnuma-dev && \
+    cd "$SOURCE" && \
+    wget -O x265.tar.bz2 https://bitbucket.org/multicoreware/x265_git/get/master.tar.bz2 && \
+    tar xjvf x265.tar.bz2 && \
+    cd multicoreware*/build/linux && \
+    PATH="$BIN:$PATH" cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$BUILD" -DENABLE_SHARED:BOOL=OFF -DSTATIC_LINK_CRT:BOOL=ON -DENABLE_CLI:BOOL=OFF ../../source && \
+    sed -i 's/-lgcc_s/-lgcc_eh/g' x265.pc && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libfdk-aac
+INST_LIBFDK-AAC() {
+    cd "$SOURCE" && \
+    git -C fdk-aac pull 2> /dev/null || git clone --depth 1 https://github.com/mstorsjo/fdk-aac && \
+    cd fdk-aac && \
+    autoreconf -fiv && ./configure --prefix="$BUILD" --disable-shared && \
+    make -j$(nproc) && make -j$(nproc) install && make -j$(nproc) distclean
+}
+
+# libvpx
+INST_LIBVPX() {
+    cd "$SOURCE" && \
+    git -C libvpx pull 2> /dev/null || git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git && \
+    cd libvpx && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-examples --disable-unit-tests --enable-vp9-highbitdepth --as=nasm && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install && make clean && make distclean
+}
+
+# libmp3lame
+    INST_LIBMP3LAME() {
+    cd "$SOURCE" && \
+    curl -L https://sourceforge.net/projects/lame/files/latest/download | tar xz && cd "$(ls | grep lame-*)" && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --enable-nasm --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install && make distclean
+}
+
+# lipopus
+INST_LIBOPUS() {
+    cd "$SOURCE" && \
+    git -C opus pull 2> /dev/null || git clone --depth 1 https://github.com/xiph/opus.git && \
+    cd opus && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libaom
+INST_LIBAOM() {
+    cd "$SOURCE" && \
+    git -C aom pull 2> /dev/null || git clone --depth 1 https://aomedia.googlesource.com/aom && \
+    mkdir aom_build && cd aom_build && \
+    PATH="$BIN:$PATH" cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$BUILD" -DENABLE_SHARED=off -DENABLE_NASM=on ../aom && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libsvtav1
+INST_LIBSVTAV1() {
+    cd "$SOURCE" && \
+    git -C SVT-AV1 pull 2> /dev/null || git clone --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git && \
+    mkdir -p SVT-AV1/build && cd SVT-AV1/build && \
+    PATH="$BIN:$PATH" cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$BUILD" -DCMAKE_BUILD_TYPE=Release -DBUILD_DEC=OFF -DBUILD_SHARED_LIBS=OFFn -DENABLE_NASM=on .. && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libass
+INST_LIBASS() {
+    cd "$SOURCE" && \
+    git -C libass pull 2> /dev/null || git clone --depth 1 https://github.com/libass/libass.git && \
+    cd libass && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libsoxr
+INST_LIBSOXR() {
+    cd "$SOURCE" && \
+    wget -O soxr_Source.tar.xz https://sourceforge.net/projects/soxr/files/latest/download && \
+    tar xf soxr_Source.tar.xz && \
+    cd soxr-0* && \
+    PATH="$BIN:$PATH" cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$BUILD" -DBUILD_SHARED_LIBS:bool=off -DWITH_OPENMP:bool=off -DBUILD_TESTS:bool=off && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libvorbis
+INST_LIBVORBIS() {
+    cd "$SOURCE" && \
+    git -C vorbis pull 2> /dev/null || git clone --depth 1 https://github.com/xiph/vorbis.git && \
+    cd vorbis && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libogg
+INST_LIBOGG() {
+    cd "$SOURCE" && \
+    git -C ogg pull 2> /dev/null || git clone --depth 1 https://github.com/xiph/ogg.git && \
+    cd ogg && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libwebp
+INST_LIBWEBP() {
+    cd "$SOURCE" && \
+    git -C libwebp pull 2> /dev/null || git clone --depth 1 https://github.com/webmproject/libwebp.git && \
+    cd libwebp && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libopenjpeg
+INST_LIBOPENJPEG() {
+    cd "$SOURCE" && \
+    git -C openjpeg pull 2> /dev/null || git clone --depth 1 https://github.com/uclouvain/openjpeg.git && \
+    cd openjpeg && \
+    PATH="$BIN:$PATH" cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$BUILD" -DBUILD_SHARED_LIBS:bool=off && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libopenssl
+INST_LIBOPENSSL() {
+    cd "$SOURCE" && \
+    git -C openssl pull 2> /dev/null || git clone --depth 1 https://github.com/openssl/openssl.git && \
+    cd openssl && \
+    ./config -static --libdir=lib --prefix="$BUILD" && \
+    make -j$(nproc) && make -j$(nproc) install
+}
+
+# libsrt
+INST_LIBSRT() {
+    cd "$SOURCE" && \
+    git -C srt pull 2> /dev/null || git clone --depth 1 https://github.com/Haivision/srt.git && \
+    cd srt && \
+    mkdir -p build && \
+    PATH="$BIN:$PATH" cmake -DOPENSSL_ROOT_DIR="$BUILD" -DENABLE_APPS=OFF -DCMAKE_INSTALL_PREFIX="$BUILD" -DENABLE_C_DEPS=ON -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DOPENSSL_USE_STATIC_LIBS=ON && \
+    sed -i 's/-lgcc_s/-lgcc_eh/g' haisrt.pc && \
+    sed -i 's/-lgcc_s/-lgcc_eh/g' srt.pc && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libspeex 
+INST_LIBSPEEX() {
+    cd "$SOURCE" && \
+    git -C speex pull 2> /dev/null || git clone --depth 1 https://github.com/xiph/speex.git && \
+    cd speex && \
+    ./autogen.sh && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libmp3lame
+INST_LIBMP3LAME() {
+    cd "$SOURCE" && \
+    wget -O lame.tar.gz https://sourceforge.net/projects/lame/files/latest/download && \
+    tar -xvzf lame.tar.gz && \
+    cd lame* && \
+    PATH="$BIN:$PATH" ./configure --prefix="$BUILD" --disable-shared && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# libvpl
+INST_LIBVPL() {
+    cd "$SOURCE" && \
+    git -C libvpl pull 2> /dev/null || git clone --depth 1 https://github.com/intel/libvpl.git && \
+    cd libvpl && \
+    export VPL_INSTALL_DIR="$BUILD"
+    sudo script/bootstrap
+    PATH="$BIN:$PATH" cmake -B _build -DCMAKE_INSTALL_PREFIX=$VPL_INSTALL_DIR -DBUILD_DISPATCHER_STATIC=ON -BUILD_SHARED_LIBS=OFF && \
+    PATH="$BIN:$PATH" cmake --build _build && \
+    PATH="$BIN:$PATH" cmake --install _build
+}
+
+# libmfx
+INST_LIBMFX() {
+    cd "$SOURCE" && \
+    git -C MediaSDK pull 2> /dev/null || git clone --depth 1 https://github.com/Intel-Media-SDK/MediaSDK.git && \
+    cd MediaSDK && \
+    mkdir -p build && cd build && \
+    PATH="$BIN:$PATH" cmake -DCMAKE_INSTALL_PREFIX="$BUILD" .. && \
+    PATH="$BIN:$PATH" make && \
+    PATH="$BIN:$PATH" make install
+}
+
+# Custom package
+INST_CUST() {
+    # Install custom dependencies
+    # INST_NASM
+    # INST_ZLIB
+    # INST_LIBSPEEX
+    # INST_LIBMP3LAME
+    # INST_LIBOPENSSL
+    # INST_LIBSRT
+    # INST_LIBASS
+    # INST_LIBX264
+    # INST_LIBX265
+    # INST_LIBVPX
+    # INST_LIBFDK-AAC
+    # INST_LIBMP3LAME
+    # INST_LIBOPUS
+    # INST_LIBAOM
+    # INST_LIBSOXR
+    # INST_LIBVORBIS
+    # INST_LIBOGG
+    # INST_LIBWEBP
+    # INST_LIBOPENJPEG
+    # INST_LIBVPL
+    INST_LIBMFX
+    # INST_LIBSVTAV1
+}
+
+# Compile FFMPEG
+INST_FFMPEG() {
+    cd "$SOURCE" && \
+    wget -O ffmpeg-snapshot.tar.bz2 https://ffmpeg.org/releases/ffmpeg-snapshot.tar.bz2 && \
+    tar xjvf ffmpeg-snapshot.tar.bz2 && \
+    cd ffmpeg && \
+    make clean && make distclean
+    export 
+    PATH="$BIN:$PATH" PKG_CONFIG_PATH="$BUILD/lib/pkgconfig" ./configure \
+    --extra-version=24.04C --prefix="$BUILD" --pkg-config-flags="--static" --extra-cflags="-I$BUILD/include" \
+    --extra-ldflags="-L$BUILD/lib" --extra-libs="-lpthread -lm" --extra-ldexeflags="-static" --bindir="$BIN" \
+    --target-os=Linux $FLAGLIST && \
+    PATH="$BIN:$PATH" make -j$(nproc) && make -j$(nproc) install
+}
+
+# Install common dependencies
+# sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y && \
+# sudo apt install -y $PKGLIST
+# Create working directory
+# CREATE_WD
+INST_CUST
+# INST_FFMPEG
